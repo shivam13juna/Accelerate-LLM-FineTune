@@ -11,8 +11,11 @@ Usage:
 
 from src.train import train
 
-# FSDP: 4x larger batch size — sharding frees up ~9GB per GPU
+# FSDP: 4x larger batch size — sharding frees up ~9GB per GPU.
+# The same value OOMs under DDP; that contrast is the point of the two files.
 BATCH_SIZE = 8
 
 if __name__ == "__main__":
-    train(batch_size=BATCH_SIZE)
+    # Identical to train_ddp.py apart from BATCH_SIZE — the sharding comes from
+    # the accelerate config, not from this script.
+    train(batch_size=BATCH_SIZE)  # save_model defaults to False

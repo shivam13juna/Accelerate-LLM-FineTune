@@ -12,8 +12,12 @@ Usage:
 
 from src.train import train
 
-# DDP: conservative batch size — full model replica on every GPU
+# DDP: conservative batch size — full model replica on every GPU.
+# Raise this to 8 to reproduce the out-of-memory error on a 24GB card.
 BATCH_SIZE = 2
 
 if __name__ == "__main__":
-    train(batch_size=BATCH_SIZE)
+    # Every launched process runs this file top to bottom, so all ranks call
+    # train() with the same batch size. Per-rank differences come from
+    # accelerate's environment, not from anything here.
+    train(batch_size=BATCH_SIZE)  # save_model defaults to False

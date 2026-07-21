@@ -1,17 +1,57 @@
-compute_environment: LOCAL_MACHINE
-distributed_type: FSDP
-num_machines: 1
-num_processes: 2
-mixed_precision: bf16
-main_training_function: main
+# Accelerate config for FSDP (Fully Sharded Data Parallel).
+# Passed with: accelerate launch --config_file configs/fsdp_config.yaml train_fsdp.py
+#
+# Everything above `fsdp_config:` is identical to ddp_config.yaml except
+# distributed_type. The training code is unchanged between the two.
+
+compute_environment: LOCAL_MACHINE  # this box, not SageMaker/AWS
+distributed_type: FSDP              # shard state across GPUs instead of replicating it
+num_machines: 1                     # single node
+num_processes: 2                    # one process per GPU — also the shard count
+mixed_precision: bf16               # must match bf16=True in SFTConfig
+main_training_function: main        # entry symbol for notebook_launcher; unused here
+
 fsdp_config:
+  # What gets sharded. FULL_SHARD splits parameters, gradients AND optimizer
+  # states — the full 16 bytes/param divided by num_processes. Alternatives:
+  # SHARD_GRAD_OP (grads + optimizer only, keeps params replicated) and
+  # NO_SHARD (equivalent to DDP).
   fsdp_sharding_strategy: FULL_SHARD
+
+  # How the model is cut into shardable units. TRANSFORMER_BASED_WRAP makes each
+  # decoder layer its own unit, so only one layer is ever fully materialised.
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+
+  # Which class counts as "a layer" for the policy above. MUST match the model's
+  # architecture: LlamaDecoderLayer for TinyLlama/Llama, Qwen2DecoderLayer for
+  # Qwen2.5, MistralDecoderLayer for Mistral. A wrong name silently wraps nothing
+  # and you lose the memory savings without any error.
   fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer
+
+  # Start gathering layer N-1's parameters while layer N is still computing its
+  # backward pass. Costs a little memory, hides communication latency.
   fsdp_backward_prefetch_policy: BACKWARD_PRE
+
+  # Same idea for the forward pass. Off because it raises peak memory, which is
+  # the thing this repo is trying to keep low.
   fsdp_forward_prefetch: false
+
+  # Save each rank's shard rather than gathering the whole model onto rank 0 —
+  # gathering would need the full 4.4GB on one GPU, defeating the point.
   fsdp_state_dict_type: SHARDED_STATE_DICT
+
+  # Broadcast rank 0's weights to everyone at startup so all shards derive from
+  # identical initial values.
   fsdp_sync_module_states: true
+
+  # Keep the original nn.Parameter objects visible after wrapping. Required for
+  # HuggingFace Trainer, which inspects parameters when building the optimizer.
   fsdp_use_orig_params: true
+
+  # Load the checkpoint into CPU RAM on rank 0 only, then shard out to the GPUs.
+  # Without this all N processes load a full copy at once during init.
   fsdp_cpu_ram_efficient_loading: true
+
+  # Keep shards on the GPU. Set true to park them in CPU RAM between uses —
+  # saves a lot of VRAM, costs a lot of speed. Not needed at this model size.
   fsdp_offload_params: false

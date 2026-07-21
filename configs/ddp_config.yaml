@@ -1,6 +1,11 @@
-compute_environment: LOCAL_MACHINE
-distributed_type: MULTI_GPU
-num_machines: 1
-num_processes: 2
-mixed_precision: bf16
-main_training_function: main
+# Accelerate config for DDP (Distributed Data Parallel).
+# Passed with: accelerate launch --config_file configs/ddp_config.yaml train_ddp.py
+
+compute_environment: LOCAL_MACHINE  # this box, not SageMaker/AWS
+distributed_type: MULTI_GPU         # "MULTI_GPU" means DDP — the only line that differs
+                                    # in kind from the FSDP config
+num_machines: 1                     # single node; >1 needs a rendezvous host and port
+num_processes: 2                    # one process per GPU — set this to your GPU count
+mixed_precision: bf16               # must match bf16=True in SFTConfig, or Trainer raises
+main_training_function: main        # entry symbol for notebook_launcher; unused by
+                                    # `accelerate launch`, which just runs the script

@@ -98,6 +98,30 @@ Host vast
 all and the server can cut you off with "Too many authentication failures" before
 reaching the right one.
 
+### Connecting with this key
+
+Because the key lives in `vast_ed25519` rather than the default `id_ed25519`, SSH
+will **not** find it on its own. Every connection needs `-i` pointing at the private
+key (the file with no `.pub`):
+
+```bash
+ssh -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
+```
+
+Same flag for copying files off the box later — note `scp` wants a capital `-P` for
+the port where `ssh` wants lowercase:
+
+```bash
+scp -i ~/.ssh/vast_ed25519 -P <PORT> root@<HOST>:/path/to/file .
+```
+
+> **This is the step people trip on.** The Connect button in the vast.ai console
+> gives you a command like `ssh -p 12345 root@ssh4.vast.ai` with no `-i`. Pasted as
+> is, it fails with `Permission denied (publickey)` — not because your key is wrong,
+> but because SSH never offered it. Either add `-i ~/.ssh/vast_ed25519` to whatever
+> the console gives you, or use the `Host vast` config block above, which applies the
+> right key automatically so plain `ssh vast` works.
+
 ## 2. Rent the instance
 
 Filter for **2 GPUs on one machine**, 24 GB each, and — critically — **enough disk**.
@@ -128,12 +152,17 @@ vastai show instances
 ## 3. Connect
 
 Grab the host and port from the console's Connect button, or `vastai ssh-url <ID>`.
+Then add `-i` with your key — the console's version omits it:
 
 ```bash
 ssh -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
 ```
 
-Or just `ssh vast` if you added the config block above.
+Or just `ssh vast` if you added the config block in step 1.
+
+A first connection that lands at a `root@...:~#` prompt means the key is working.
+If it asks for a password or refuses you, jump to `Permission denied (publickey)`
+in troubleshooting.
 
 vast.ai gives you two connection paths. **Direct** (`--direct` at create time) connects
 straight to the machine's IP and is faster. **Proxy** routes through
@@ -285,8 +314,25 @@ roughly half — visible in real time, which makes the point better than the log
 
 ### `Permission denied (publickey)`
 
-Usually the key was added to your vast.ai account *after* this instance started, so it
-was never injected — account keys only propagate to instances created afterwards.
+Two causes, and the first is far more common.
+
+**1. You forgot `-i`.** The console's Connect command has no `-i`, so SSH never offers
+your `vast_ed25519` key at all — it only tries default names like `id_ed25519` and
+`id_rsa`. Nothing is wrong with the key; it was simply not presented:
+
+```bash
+ssh -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
+```
+
+Confirm which keys SSH actually offered:
+
+```bash
+ssh -v -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST> 2>&1 | grep -i 'offering\|publickey'
+```
+
+**2. The key really is not on the instance.** This happens when it was added to your
+vast.ai account *after* this instance started — account keys only propagate to
+instances created afterwards.
 
 **No restart needed.** Attach the key straight to the running instance: find it in the
 console, open **Manage SSH Keys**, and paste your public key. The dialog shows
@@ -298,12 +344,6 @@ The CLI equivalent, if the console is awkward:
 ```bash
 vastai attach ssh <INSTANCE_ID> "$(cat ~/.ssh/vast_ed25519.pub)"
 vastai show ssh-keys
-```
-
-To see which key SSH is actually offering:
-
-```bash
-ssh -v -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST> 2>&1 | grep -i 'offering\|publickey'
 ```
 
 ### `REMOTE HOST IDENTIFICATION HAS CHANGED`

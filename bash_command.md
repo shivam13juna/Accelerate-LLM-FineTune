@@ -75,12 +75,22 @@ Paste it into your provider's SSH-keys page.
 ### Connecting with this key
 
 Because the key lives in `gpu_ed25519` rather than the default `id_ed25519`, SSH
-will **not** find it on its own. Every connection needs `-i` pointing at the private
-key (the file with no `.pub`):
+will **not** find it on its own. Every connection needs `-i` pointing at the key:
 
 ```bash
 ssh -i ~/.ssh/gpu_ed25519 -p <PORT> root@<HOST>
 ```
+
+> **`-i` takes the PRIVATE key — no `.ssh/…pub` suffix.** This is the single most
+> common mistake here, because the two files differ by four characters and the public
+> one is the one you were just pasting into a web form. They swap places:
+>
+> | File | Goes here |
+> |---|---|
+> | `gpu_ed25519.pub` | pasted into the provider's web form |
+> | `gpu_ed25519` | passed to `ssh -i` |
+>
+> Using the `.pub` by mistake fails with `Load key "...pub": invalid format`.
 
 Same flag for copying files off the box later — note `scp` wants a capital `-P` for
 the port where `ssh` wants lowercase:
@@ -287,11 +297,34 @@ roughly half — visible in real time, which makes the point better than the log
 
 ## Troubleshooting
 
+### `Load key "….pub": invalid format` / `bad permissions`
+
+You passed the **public** key to `-i`. It wants the private one — same path, without
+the `.pub`:
+
+```bash
+ssh -i ~/.ssh/gpu_ed25519 -p <PORT> root@<HOST>     # correct
+ssh -i ~/.ssh/gpu_ed25519.pub ...                   # wrong, invalid format
+```
+
+If it complained about permissions first, that was the same mistake surfacing
+earlier — SSH checks the mode before it parses the file, so a world-readable `.pub`
+trips the permission warning before anything notices it is not a private key.
+Fixing only the permissions makes the error change, not go away.
+
+Correct modes are:
+
+```bash
+chmod 600 ~/.ssh/gpu_ed25519        # private — must be locked down
+chmod 644 ~/.ssh/gpu_ed25519.pub    # public — not secret
+```
+
 ### `Permission denied (publickey)`
 
 Two causes, and the first is far more common.
 
-**1. You forgot `-i`.** The connect command from your provider's console has no `-i`,
+**1. You forgot `-i`, or pointed it at the `.pub`.** The connect command from your
+provider's console has no `-i`,
 so SSH never offers your `gpu_ed25519` key at all — it only tries default names like
 `id_ed25519` and `id_rsa`. Nothing is wrong with the key; it was simply not presented:
 

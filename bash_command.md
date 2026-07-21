@@ -1,23 +1,17 @@
-# Setup Runbook — vast.ai (2× RTX 3090)
+# Setup Runbook — Rented GPU Box (2× 24 GB)
 
 Copy-paste commands for going from a fresh rented instance to both training runs.
+Works on any provider that gives you SSH into a multi-GPU Linux box — vast.ai,
+RunPod, Lambda, a university cluster node. Everything here is plain SSH and shell;
+only the renting and teardown steps go through your provider's console.
+
 Read the STOP check in step 4 — it catches the failures that waste rental hours.
 
 ---
 
 ## 1. Set up your SSH key (one time, on your own machine)
 
-Easiest done **before** renting, though it is not a hard requirement — vast.ai keeps
-SSH keys at two levels:
-
-| Level | Where | Behaviour |
-|---|---|---|
-| **Account** — "Your SSH Keys" | Console → Keys | Injected into every **new** instance at start. Set once, forget. |
-| **Instance** — "Instance SSH Keys" | Instance row → Manage SSH Keys | Attached to one **running** instance, applies immediately. No restart. |
-
-So doing it first means every future instance just works. If you have already rented
-and cannot get in, you are not stuck — attach a key to the running instance via the
-Manage SSH Keys dialog (see troubleshooting below).
+Easiest done before renting, so the key is in place when the box comes up.
 
 First check whether you already have a key worth reusing:
 
@@ -25,108 +19,103 @@ First check whether you already have a key worth reusing:
 ls -la ~/.ssh/*.pub 2>/dev/null
 ```
 
-Generate one dedicated to vast.ai, so it stays separate from your GitHub/work keys:
+Generate one dedicated to this, so it stays separate from your GitHub/work keys:
 
 ```bash
-ssh-keygen -t ed25519 -C "vast.ai" -f ~/.ssh/vast_ed25519
+ssh-keygen -t ed25519 -C "gpu-rental" -f ~/.ssh/gpu_ed25519
 ```
 
 Press Enter twice to skip the passphrase, or set one and cache it in the macOS
 keychain:
 
 ```bash
-ssh-add --apple-use-keychain ~/.ssh/vast_ed25519
+ssh-add --apple-use-keychain ~/.ssh/gpu_ed25519
 ```
 
 That produces two files:
 
 | File | What it is |
 |---|---|
-| `~/.ssh/vast_ed25519` | **Private key — secret.** Never share, never paste anywhere. |
-| `~/.ssh/vast_ed25519.pub` | Public key. This is the one you give to vast.ai. |
+| `~/.ssh/gpu_ed25519` | **Private key — secret.** Never share, never paste anywhere. |
+| `~/.ssh/gpu_ed25519.pub` | Public key. This is the one you hand to the provider. |
 
 Fix permissions (SSH silently refuses keys that are too readable):
 
 ```bash
 chmod 700 ~/.ssh
-chmod 600 ~/.ssh/vast_ed25519
-chmod 644 ~/.ssh/vast_ed25519.pub
+chmod 600 ~/.ssh/gpu_ed25519
+chmod 644 ~/.ssh/gpu_ed25519.pub
 ```
 
 Copy the **public** key to your clipboard:
 
 ```bash
 # macOS
-pbcopy < ~/.ssh/vast_ed25519.pub
+pbcopy < ~/.ssh/gpu_ed25519.pub
 
 # Linux
-xclip -selection clipboard < ~/.ssh/vast_ed25519.pub
+xclip -selection clipboard < ~/.ssh/gpu_ed25519.pub
 
 # or just print it and copy by hand
-cat ~/.ssh/vast_ed25519.pub
+cat ~/.ssh/gpu_ed25519.pub
 ```
 
 > **Only ever paste the `.pub` file.** It starts with `ssh-ed25519 AAAA…`. If what
 > you are looking at starts with `-----BEGIN OPENSSH PRIVATE KEY-----`, that is the
 > private key and it must never leave your machine.
 
-Add it to your account in the vast.ai console under **Keys → SSH Keys → New**, paste,
-save. Or via the CLI:
+Paste it into your provider's SSH-keys page.
 
-```bash
-pip install --upgrade vastai
-vastai set api-key <YOUR_API_KEY>
-
-vastai create ssh-key "$(cat ~/.ssh/vast_ed25519.pub)"
-vastai show ssh-keys
-```
-
-Optionally add a shortcut to `~/.ssh/config` so you can type `ssh vast` instead of
-the full command — fill in HostName and Port once the instance is running:
-
-```
-Host vast
-    HostName <HOST>
-    Port <PORT>
-    User root
-    IdentityFile ~/.ssh/vast_ed25519
-    IdentitiesOnly yes
-    StrictHostKeyChecking accept-new
-```
-
-`IdentitiesOnly yes` matters if you have several keys — without it SSH offers them
-all and the server can cut you off with "Too many authentication failures" before
-reaching the right one.
+> **Where providers differ:** some hold keys per-account, some per-instance, some
+> both. vast.ai does both — an account key is injected into instances created
+> *afterwards*, while its per-instance "Manage SSH Keys" dialog attaches a key to an
+> already-running box and takes effect immediately. If you rented before adding a
+> key, look for the per-instance option before assuming you have to rebuild.
 
 ### Connecting with this key
 
-Because the key lives in `vast_ed25519` rather than the default `id_ed25519`, SSH
+Because the key lives in `gpu_ed25519` rather than the default `id_ed25519`, SSH
 will **not** find it on its own. Every connection needs `-i` pointing at the private
 key (the file with no `.pub`):
 
 ```bash
-ssh -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
+ssh -i ~/.ssh/gpu_ed25519 -p <PORT> root@<HOST>
 ```
 
 Same flag for copying files off the box later — note `scp` wants a capital `-P` for
 the port where `ssh` wants lowercase:
 
 ```bash
-scp -i ~/.ssh/vast_ed25519 -P <PORT> root@<HOST>:/path/to/file .
+scp -i ~/.ssh/gpu_ed25519 -P <PORT> root@<HOST>:/path/to/file .
 ```
 
-> **This is the step people trip on.** The Connect button in the vast.ai console
-> gives you a command like `ssh -p 12345 root@ssh4.vast.ai` with no `-i`. Pasted as
-> is, it fails with `Permission denied (publickey)` — not because your key is wrong,
-> but because SSH never offered it. Either add `-i ~/.ssh/vast_ed25519` to whatever
-> the console gives you, or use the `Host vast` config block above, which applies the
-> right key automatically so plain `ssh vast` works.
+> **This is the step people trip on.** The connect command your provider shows you
+> is usually just `ssh -p 12345 root@some.host` with no `-i`. Pasted as is, it fails
+> with `Permission denied (publickey)` — not because your key is wrong, but because
+> SSH never offered it.
+
+Save yourself the flag by adding a shortcut to `~/.ssh/config`, filling in the host
+and port once the instance is running:
+
+```
+Host gpubox
+    HostName <HOST>
+    Port <PORT>
+    User root
+    IdentityFile ~/.ssh/gpu_ed25519
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+```
+
+Then plain `ssh gpubox` works. `IdentitiesOnly yes` matters if you have several keys
+— without it SSH offers them all and the server can cut you off with "Too many
+authentication failures" before reaching the right one.
 
 ## 2. Rent the instance
 
-Filter for **2 GPUs on one machine**, 24 GB each, and — critically — **enough disk**.
-vast.ai defaults to ~10 GB, which is not enough: torch wheels alone are ~3 GB, and
-the model plus HF cache adds another ~3 GB.
+Book **2 GPUs on one machine**, 24 GB each, and — critically — **enough disk**.
+Providers commonly default to ~10 GB, which is not enough: torch wheels alone are
+~3 GB, and the model plus HF cache adds another ~3 GB.
 
 | Setting | Value | Why |
 |---|---|---|
@@ -135,39 +124,21 @@ the model plus HF cache adds another ~3 GB.
 | CUDA | ≥ 12.1 | host driver must support the torch wheel |
 | Image | `pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime` | any CUDA base is fine; uv installs its own torch |
 
-Via the web console is most reliable. If you prefer the CLI:
-
-```bash
-# find offers
-vastai search offers 'num_gpus=2 gpu_name=RTX_3090 disk_space>=50 cuda_vers>=12.1' -o 'dph+'
-
-# create (flags drift between vastai versions — check `vastai create instance --help`)
-vastai create instance <OFFER_ID> \
-  --image pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime \
-  --disk 50 --ssh --direct
-
-vastai show instances
-```
+Two GPUs must be on the **same physical machine** — this is single-node distributed
+training, not multi-node. Anything sold as "2 GPUs" in one instance qualifies.
 
 ## 3. Connect
 
-Grab the host and port from the console's Connect button, or `vastai ssh-url <ID>`.
-Then add `-i` with your key — the console's version omits it:
+Take the host and port from your provider's console, and add `-i` with your key:
 
 ```bash
-ssh -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
+ssh -i ~/.ssh/gpu_ed25519 -p <PORT> root@<HOST>
 ```
 
-Or just `ssh vast` if you added the config block in step 1.
+Or just `ssh gpubox` if you added the config block in step 1.
 
-A first connection that lands at a `root@...:~#` prompt means the key is working.
-If it asks for a password or refuses you, jump to `Permission denied (publickey)`
-in troubleshooting.
-
-vast.ai gives you two connection paths. **Direct** (`--direct` at create time) connects
-straight to the machine's IP and is faster. **Proxy** routes through
-`root@sshN.vast.ai` and works when the host has no open inbound ports. Either is
-fine here; direct is nicer for file copies.
+Landing at a `root@...:~#` prompt means the key is working. If it asks for a password
+or refuses you, jump to `Permission denied (publickey)` in troubleshooting.
 
 ## 4. STOP — verify the hardware before installing anything
 
@@ -182,13 +153,17 @@ nvidia-smi topo -m
 
 # Shared memory — Docker defaults to 64MB, which crashes dataloader workers
 df -h /dev/shm
+
+# Disk actually provisioned
+df -h /
 ```
 
 **What you need to see:**
 
 - **Two rows** from the first command. One row means you got a single-GPU box — destroy it, this demo needs two.
 - **`compute_cap` of 8.0 or higher.** 7.5 is Turing and has no bf16; the configs will fail.
-- **`/dev/shm` of at least 1 GB.** If it shows 64M, add `dataloader_num_workers=0` to `SFTConfig` in `src/train.py`, or recreate the instance with a larger `--shm-size`.
+- **`/dev/shm` of at least 1 GB.** If it shows 64M, add `dataloader_num_workers=0` to `SFTConfig` in `src/train.py`.
+- **At least ~40 GB free on `/`.** Less than that and `uv sync` will die partway.
 
 ## 5. Install uv, clone, sync
 
@@ -316,39 +291,28 @@ roughly half — visible in real time, which makes the point better than the log
 
 Two causes, and the first is far more common.
 
-**1. You forgot `-i`.** The console's Connect command has no `-i`, so SSH never offers
-your `vast_ed25519` key at all — it only tries default names like `id_ed25519` and
-`id_rsa`. Nothing is wrong with the key; it was simply not presented:
+**1. You forgot `-i`.** The connect command from your provider's console has no `-i`,
+so SSH never offers your `gpu_ed25519` key at all — it only tries default names like
+`id_ed25519` and `id_rsa`. Nothing is wrong with the key; it was simply not presented:
 
 ```bash
-ssh -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
+ssh -i ~/.ssh/gpu_ed25519 -p <PORT> root@<HOST>
 ```
 
 Confirm which keys SSH actually offered:
 
 ```bash
-ssh -v -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST> 2>&1 | grep -i 'offering\|publickey'
+ssh -v -i ~/.ssh/gpu_ed25519 -p <PORT> root@<HOST> 2>&1 | grep -i 'offering\|publickey'
 ```
 
-**2. The key really is not on the instance.** This happens when it was added to your
-vast.ai account *after* this instance started — account keys only propagate to
-instances created afterwards.
-
-**No restart needed.** Attach the key straight to the running instance: find it in the
-console, open **Manage SSH Keys**, and paste your public key. The dialog shows
-"Your SSH Keys" (account-level) beside "Instance SSH Keys" (this box only); the second
-list is the one that has to contain your key. It applies immediately.
-
-The CLI equivalent, if the console is awkward:
-
-```bash
-vastai attach ssh <INSTANCE_ID> "$(cat ~/.ssh/vast_ed25519.pub)"
-vastai show ssh-keys
-```
+**2. The key really is not on the box.** Common when it was added to your account
+*after* this instance started — account-level keys usually only propagate to
+instances created afterwards. Check your provider for a per-instance key option,
+which typically applies without a restart.
 
 ### `REMOTE HOST IDENTIFICATION HAS CHANGED`
 
-Not an attack — vast.ai recycles IPs and ports between instances, so a host you
+Not an attack — providers recycle IPs and ports between instances, so a host you
 trusted last week is now different hardware. Drop the stale entry:
 
 ```bash
@@ -361,14 +325,14 @@ SSH is offering every key you own and the server cuts the connection first. Forc
 just the one:
 
 ```bash
-ssh -o IdentitiesOnly=yes -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
+ssh -o IdentitiesOnly=yes -i ~/.ssh/gpu_ed25519 -p <PORT> root@<HOST>
 ```
 
 ### Training hangs at 0% with no error — the classic 3090 failure
 
 NVIDIA disables peer-to-peer over PCIe on GeForce cards, so NCCL can hang forever
-during init on consumer GPUs. This is the single most common vast.ai multi-GPU
-problem. Fix:
+during init on consumer GPUs. This is the single most common multi-GPU problem on
+rented consumer hardware. Fix:
 
 ```bash
 export NCCL_P2P_DISABLE=1
@@ -389,8 +353,8 @@ Look for NCCL stalling after the topology detection lines.
 df -h /
 ```
 
-You provisioned too little disk. Disk cannot be resized on a running vast.ai
-instance — destroy it and recreate with `--disk 50`.
+You provisioned too little disk. Most providers cannot resize a running instance —
+destroy it and recreate with 50 GB.
 
 ### Dataloader workers crash / bus error
 
@@ -416,18 +380,14 @@ Costs ~30% speed, saves a large amount of activation memory.
 
 ## Teardown
 
-**Billing continues while the instance is stopped.** Only destroying it stops charges.
-
-Copy anything you want to keep off the box first:
+Copy anything you want to keep off the box first — instance storage does not survive:
 
 ```bash
-scp -i ~/.ssh/vast_ed25519 -P <PORT> root@<HOST>:~/Accelerate-LLM-FineTune/output.log .
+scp -i ~/.ssh/gpu_ed25519 -P <PORT> root@<HOST>:~/Accelerate-LLM-FineTune/output.log .
 ```
 
-Then destroy it:
+Then destroy the instance from your provider's console.
 
-```bash
-vastai destroy instance <INSTANCE_ID>
-```
-
-Or use the Destroy button in the console. Instance storage is gone for good.
+> **Stopping is usually not enough.** Most GPU rental providers keep billing for
+> storage on a stopped instance — only destroying it stops charges entirely. Check
+> your provider's rules rather than assuming a stopped box is a free box.

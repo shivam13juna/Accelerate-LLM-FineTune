@@ -253,7 +253,7 @@ You should see a CUDA out-of-memory error with DDP, proving that FSDP's memory s
 ├── train_ddp.py              # DDP entry point (batch_size=2)
 ├── train_fsdp.py             # FSDP entry point (batch_size=8)
 ├── pyproject.toml            # Dependencies (managed by uv)
-├── bash_command.md           # Setup runbook for a rented vast.ai box
+├── bash_command.md           # Setup runbook for a rented multi-GPU box
 └── README.md
 ```
 

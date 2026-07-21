@@ -1,0 +1,14 @@
+[project]
+name = "llm-finetuning-tutorial"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.4",
+    # `dtype=` on from_pretrained (renamed from torch_dtype) landed in 4.56
+    "transformers>=4.56",
+    "datasets>=2.19",
+    "accelerate>=1.0",
+    "huggingface-hub>=0.23",
+    # SFTConfig(max_length=...) — renamed from max_seq_length in trl 0.20
+    "trl>=0.20",
+]

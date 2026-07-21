@@ -170,7 +170,7 @@ df -h /
 
 **What you need to see:**
 
-- **Two rows** from the first command. One row means you got a single-GPU box — destroy it, this demo needs two.
+- **Two rows** from the first command. One row means you got a single-GPU box — destroy it, the configs here need two.
 - **`compute_cap` of 8.0 or higher.** 7.5 is Turing and has no bf16; the configs will fail.
 - **`/dev/shm` of at least 1 GB.** If it shows 64M, add `dataloader_num_workers=0` to `SFTConfig` in `src/train.py`.
 - **At least ~40 GB free on `/`.** Less than that and `uv sync` will die partway.
@@ -258,7 +258,7 @@ uv run accelerate launch --config_file configs/ddp_config.yaml train_ddp.py
 uv run accelerate launch --config_file configs/fsdp_config.yaml train_fsdp.py
 ```
 
-Each prints its peak memory per rank at the end. That comparison is the demo:
+Each prints its peak memory per rank at the end. That comparison is the whole point:
 
 ```
 [rank 0] peak GPU memory: ~20 GB / 24.0 GB     # DDP,  batch 2
@@ -267,7 +267,7 @@ Each prints its peak memory per rank at the end. That comparison is the demo:
 
 FSDP uses less memory while doing 4× more work per step.
 
-## 10. The OOM demo
+## 10. Reproducing the DDP out-of-memory error
 
 ```bash
 sed -i 's/^BATCH_SIZE = 2/BATCH_SIZE = 8/' train_ddp.py
@@ -281,8 +281,10 @@ sed -i 's/^BATCH_SIZE = 8/BATCH_SIZE = 2/' train_ddp.py
 DDP at batch 8 needs ~26 GB against a 24 GB card. FSDP at the same batch size needs
 ~17 GB, because sharding halves the 17.6 GB fixed cost.
 
-> Run this once before class. The activation estimate is version-dependent, so
-> confirm it actually OOMs on your specific instance rather than finding out live.
+> **If it trains instead of failing**, your activation footprint is smaller than
+> estimated — the number moves with the transformers version and attention backend.
+> Raise `BATCH_SIZE` to 12 or 16 and it will OOM. The threshold is hardware- and
+> version-specific; the gap between the two strategies is not.
 
 ## 11. Watch memory in a second terminal
 
@@ -291,7 +293,7 @@ watch -n 1 nvidia-smi --query-gpu=index,memory.used,memory.total,utilization.gpu
 ```
 
 Under DDP both GPUs sit at nearly identical high memory. Under FSDP both drop by
-roughly half — visible in real time, which makes the point better than the logs do.
+roughly half — easier to watch happen here than to read off the end-of-run logs.
 
 ---
 

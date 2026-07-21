@@ -253,6 +253,7 @@ You should see a CUDA out-of-memory error with DDP, proving that FSDP's memory s
 ├── train_ddp.py              # DDP entry point (batch_size=2)
 ├── train_fsdp.py             # FSDP entry point (batch_size=8)
 ├── pyproject.toml            # Dependencies (managed by uv)
+├── bash_command.md           # Setup runbook for a rented vast.ai box
 └── README.md
 ```
 
@@ -307,5 +308,3 @@ apply the 16 bytes/param rule and change three things:
 | Qwen2.5-7B | ~112 GB | ~28 GB on 4 GPUs |
 
 ---
-
-Adapted from [AkashRajpuria/llm_finetune](https://github.com/AkashRajpuria/llm_finetune).

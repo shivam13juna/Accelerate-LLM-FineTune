@@ -1,11 +1,96 @@
 # Setup Runbook — vast.ai (2× RTX 3090)
 
 Copy-paste commands for going from a fresh rented instance to both training runs.
-Read the two "STOP" checks — they catch the failures that waste rental hours.
+Read the STOP check in step 4 — it catches the failures that waste rental hours.
 
 ---
 
-## 1. Rent the instance
+## 1. Set up your SSH key (one time, on your own machine)
+
+Do this **before** renting. vast.ai injects your public key when the container
+starts, so a key added afterwards will not let you in until the instance is
+restarted.
+
+First check whether you already have a key worth reusing:
+
+```bash
+ls -la ~/.ssh/*.pub 2>/dev/null
+```
+
+Generate one dedicated to vast.ai, so it stays separate from your GitHub/work keys:
+
+```bash
+ssh-keygen -t ed25519 -C "vast.ai" -f ~/.ssh/vast_ed25519
+```
+
+Press Enter twice to skip the passphrase, or set one and cache it in the macOS
+keychain:
+
+```bash
+ssh-add --apple-use-keychain ~/.ssh/vast_ed25519
+```
+
+That produces two files:
+
+| File | What it is |
+|---|---|
+| `~/.ssh/vast_ed25519` | **Private key — secret.** Never share, never paste anywhere. |
+| `~/.ssh/vast_ed25519.pub` | Public key. This is the one you give to vast.ai. |
+
+Fix permissions (SSH silently refuses keys that are too readable):
+
+```bash
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/vast_ed25519
+chmod 644 ~/.ssh/vast_ed25519.pub
+```
+
+Copy the **public** key to your clipboard:
+
+```bash
+# macOS
+pbcopy < ~/.ssh/vast_ed25519.pub
+
+# Linux
+xclip -selection clipboard < ~/.ssh/vast_ed25519.pub
+
+# or just print it and copy by hand
+cat ~/.ssh/vast_ed25519.pub
+```
+
+> **Only ever paste the `.pub` file.** It starts with `ssh-ed25519 AAAA…`. If what
+> you are looking at starts with `-----BEGIN OPENSSH PRIVATE KEY-----`, that is the
+> private key and it must never leave your machine.
+
+Add it to your account in the vast.ai console under **Keys → SSH Keys → New**, paste,
+save. Or via the CLI:
+
+```bash
+pip install --upgrade vastai
+vastai set api-key <YOUR_API_KEY>
+
+vastai create ssh-key "$(cat ~/.ssh/vast_ed25519.pub)"
+vastai show ssh-keys
+```
+
+Optionally add a shortcut to `~/.ssh/config` so you can type `ssh vast` instead of
+the full command — fill in HostName and Port once the instance is running:
+
+```
+Host vast
+    HostName <HOST>
+    Port <PORT>
+    User root
+    IdentityFile ~/.ssh/vast_ed25519
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+```
+
+`IdentitiesOnly yes` matters if you have several keys — without it SSH offers them
+all and the server can cut you off with "Too many authentication failures" before
+reaching the right one.
+
+## 2. Rent the instance
 
 Filter for **2 GPUs on one machine**, 24 GB each, and — critically — **enough disk**.
 vast.ai defaults to ~10 GB, which is not enough: torch wheels alone are ~3 GB, and
@@ -21,9 +106,6 @@ the model plus HF cache adds another ~3 GB.
 Via the web console is most reliable. If you prefer the CLI:
 
 ```bash
-pip install --upgrade vastai
-vastai set api-key <YOUR_API_KEY>
-
 # find offers
 vastai search offers 'num_gpus=2 gpu_name=RTX_3090 disk_space>=50 cuda_vers>=12.1' -o 'dph+'
 
@@ -35,13 +117,22 @@ vastai create instance <OFFER_ID> \
 vastai show instances
 ```
 
-## 2. Connect
+## 3. Connect
+
+Grab the host and port from the console's Connect button, or `vastai ssh-url <ID>`.
 
 ```bash
-ssh -p <PORT> root@<HOST>
+ssh -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
 ```
 
-## 3. STOP — verify the hardware before installing anything
+Or just `ssh vast` if you added the config block above.
+
+vast.ai gives you two connection paths. **Direct** (`--direct` at create time) connects
+straight to the machine's IP and is faster. **Proxy** routes through
+`root@sshN.vast.ai` and works when the host has no open inbound ports. Either is
+fine here; direct is nicer for file copies.
+
+## 4. STOP — verify the hardware before installing anything
 
 Fail fast here rather than 10 minutes into a `uv sync`.
 
@@ -62,7 +153,7 @@ df -h /dev/shm
 - **`compute_cap` of 8.0 or higher.** 7.5 is Turing and has no bf16; the configs will fail.
 - **`/dev/shm` of at least 1 GB.** If it shows 64M, add `dataloader_num_workers=0` to `SFTConfig` in `src/train.py`, or recreate the instance with a larger `--shm-size`.
 
-## 4. Install uv, clone, sync
+## 5. Install uv, clone, sync
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -88,7 +179,7 @@ print('bf16 ok    ', torch.cuda.is_bf16_supported())
 
 `gpu count 2` and `bf16 ok True` are both required. Anything else, stop and fix it here.
 
-## 5. Pre-fetch the model and dataset
+## 6. Pre-fetch the model and dataset
 
 Do this once, outside the training run — otherwise both ranks race to download the
 same files on first launch and the timings are polluted.
@@ -107,7 +198,7 @@ print('dataset cached')
 "
 ```
 
-## 6. Run inside tmux
+## 7. Run inside tmux
 
 The runs outlive your SSH session this way — a dropped connection otherwise kills
 training and wastes the rental.
@@ -118,7 +209,7 @@ tmux new -s train
 # reattach: tmux attach -t train
 ```
 
-## 7. Smoke test first (~1 minute)
+## 8. Smoke test first (~1 minute)
 
 Shrink the dataset so you find out whether the whole pipeline works before
 committing to a full run.
@@ -135,7 +226,7 @@ Restore when it passes:
 sed -i 's/^NUM_SAMPLES = 200/NUM_SAMPLES = 10_000/' src/train.py
 ```
 
-## 8. The two runs
+## 9. The two runs
 
 ```bash
 # DDP — batch 2 per GPU, effective 16
@@ -154,7 +245,7 @@ Each prints its peak memory per rank at the end. That comparison is the demo:
 
 FSDP uses less memory while doing 4× more work per step.
 
-## 9. The OOM demo
+## 10. The OOM demo
 
 ```bash
 sed -i 's/^BATCH_SIZE = 2/BATCH_SIZE = 8/' train_ddp.py
@@ -171,7 +262,7 @@ DDP at batch 8 needs ~26 GB against a 24 GB card. FSDP at the same batch size ne
 > Run this once before class. The activation estimate is version-dependent, so
 > confirm it actually OOMs on your specific instance rather than finding out live.
 
-## 10. Watch memory in a second terminal
+## 11. Watch memory in a second terminal
 
 ```bash
 watch -n 1 nvidia-smi --query-gpu=index,memory.used,memory.total,utilization.gpu --format=csv
@@ -183,6 +274,40 @@ roughly half — visible in real time, which makes the point better than the log
 ---
 
 ## Troubleshooting
+
+### `Permission denied (publickey)`
+
+Usually the key was added to your vast.ai account *after* the instance started, so it
+never got injected. Confirm the account has it:
+
+```bash
+vastai show ssh-keys
+```
+
+Then restart the instance from the console so the key is picked up. To see which key
+SSH is actually offering:
+
+```bash
+ssh -v -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST> 2>&1 | grep -i 'offering\|publickey'
+```
+
+### `REMOTE HOST IDENTIFICATION HAS CHANGED`
+
+Not an attack — vast.ai recycles IPs and ports between instances, so a host you
+trusted last week is now different hardware. Drop the stale entry:
+
+```bash
+ssh-keygen -R "[<HOST>]:<PORT>"
+```
+
+### `Too many authentication failures`
+
+SSH is offering every key you own and the server cuts the connection first. Force
+just the one:
+
+```bash
+ssh -o IdentitiesOnly=yes -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST>
+```
 
 ### Training hangs at 0% with no error — the classic 3090 failure
 
@@ -238,9 +363,16 @@ Costs ~30% speed, saves a large amount of activation memory.
 
 **Billing continues while the instance is stopped.** Only destroying it stops charges.
 
+Copy anything you want to keep off the box first:
+
+```bash
+scp -i ~/.ssh/vast_ed25519 -P <PORT> root@<HOST>:~/Accelerate-LLM-FineTune/output.log .
+```
+
+Then destroy it:
+
 ```bash
 vastai destroy instance <INSTANCE_ID>
 ```
 
-Or use the Destroy button in the console. Copy any output you want to keep first —
-instance storage is gone for good.
+Or use the Destroy button in the console. Instance storage is gone for good.

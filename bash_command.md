@@ -7,9 +7,17 @@ Read the STOP check in step 4 — it catches the failures that waste rental hour
 
 ## 1. Set up your SSH key (one time, on your own machine)
 
-Do this **before** renting. vast.ai injects your public key when the container
-starts, so a key added afterwards will not let you in until the instance is
-restarted.
+Easiest done **before** renting, though it is not a hard requirement — vast.ai keeps
+SSH keys at two levels:
+
+| Level | Where | Behaviour |
+|---|---|---|
+| **Account** — "Your SSH Keys" | Console → Keys | Injected into every **new** instance at start. Set once, forget. |
+| **Instance** — "Instance SSH Keys" | Instance row → Manage SSH Keys | Attached to one **running** instance, applies immediately. No restart. |
+
+So doing it first means every future instance just works. If you have already rented
+and cannot get in, you are not stuck — attach a key to the running instance via the
+Manage SSH Keys dialog (see troubleshooting below).
 
 First check whether you already have a key worth reusing:
 
@@ -277,15 +285,22 @@ roughly half — visible in real time, which makes the point better than the log
 
 ### `Permission denied (publickey)`
 
-Usually the key was added to your vast.ai account *after* the instance started, so it
-never got injected. Confirm the account has it:
+Usually the key was added to your vast.ai account *after* this instance started, so it
+was never injected — account keys only propagate to instances created afterwards.
+
+**No restart needed.** Attach the key straight to the running instance: find it in the
+console, open **Manage SSH Keys**, and paste your public key. The dialog shows
+"Your SSH Keys" (account-level) beside "Instance SSH Keys" (this box only); the second
+list is the one that has to contain your key. It applies immediately.
+
+The CLI equivalent, if the console is awkward:
 
 ```bash
+vastai attach ssh <INSTANCE_ID> "$(cat ~/.ssh/vast_ed25519.pub)"
 vastai show ssh-keys
 ```
 
-Then restart the instance from the console so the key is picked up. To see which key
-SSH is actually offering:
+To see which key SSH is actually offering:
 
 ```bash
 ssh -v -i ~/.ssh/vast_ed25519 -p <PORT> root@<HOST> 2>&1 | grep -i 'offering\|publickey'

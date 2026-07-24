@@ -1,5 +1,7 @@
 # LLM Finetuning: DDP vs FSDP with SFTTrainer + Accelerate
 
+![Accelerate LLM Finetuning](assets/xlr8.jpg)
+
 Finetune **TinyLlama-1.1B** on the **Alpaca** dataset using HuggingFace SFTTrainer.
 Same training logic, two distributed strategies — just swap the accelerate config file.
 
